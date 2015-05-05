@@ -1,28 +1,30 @@
-require 'rake'
-#require 'git'
-require 'logger'
-begin
-    require 'rummager'
-    rescue LoadError
-    puts "You must install the rummager gem!"
-    puts "    gem install --user-install rummager-x.y.z.gem"
-    abort
-end
+require 'rubygems'
+require 'bundler/setup'
+Bundler.require(:default)
 
 PROJ_NAME="sprauge"
 
-Rummager.repo_base = "#{PROJ_NAME}_#{Etc.getlogin}"
+if FileTest::exists?(File.join( Rake.application.original_dir, 'local.conf') )
+    puts "using local.conf" if Rake.verbose == true
+    load File.join( Rake.application.original_dir, 'local.conf')
+elsif FileTest::exists?(File.join( Rake.application.original_dir, 'local.conf.rb') )
+    puts "using local.conf" if Rake.verbose == true
+    load File.join( Rake.application.original_dir, 'local.conf.rb')
+else
+    raise LoadError, "missing local.conf! please copy from local.conf.example"
+end
+
+if defined? LOCAL_REPO
+    Rummager.repo_base = LOCAL_REPO
+else
+    Rummager.repo_base = "#{PROJ_NAME}_#{Etc.getlogin}"
+end
+
 CNTNR_USER="minion"
 
 PROJ_POSTFIX="#{PROJ_NAME}"
 CNTNR_BUILD_FILES = 'bldfiles' + PROJ_POSTFIX
 CNTNR_DEVENV = 'devenv' + PROJ_POSTFIX
-
-#APT_PROXY="10.1.10.2:3142"
-APT_PROXY="192.168.3.254:3142"
-
-GIT_NAME="Ted Vaida"
-GIT_EMAIL="ted@kstechnologies.com"
 
 FILENAME_BSP='edison-src-rel1-maint-rel1-ww42-14.tgz'
 MIRROR_INTEL='http://downloadmirror.intel.com/24389/eng'
@@ -68,126 +70,53 @@ BB_GENERATE_MIRROR_TARBALLS = "1"
 EOM
 
 EXEC_APPEND_CONF={
-:cmd => ["/bin/sh","-c","echo '#{YOCTO_CONF_APPEND}' >> #{FILE_CONF_LOCAL}"]
+    :cmd => ["/bin/sh","-c","echo '#{YOCTO_CONF_APPEND}' >> #{FILE_CONF_LOCAL}"],
 }
 
 SED_BBLAYERS_CMD1= <<EOM
-  \%/build/edison-src/device-software/meta-edison-devtools% i\
-  /extsrc/src/meta-molecule/ \\
+\\%/build/edison-src/device-software/meta-edison-devtools% a\\
+  /extsrc/src/meta-sprauge/ \\\\
 EOM
 
-EXEC_SED_BBLAYERS={ :cmd => ["/bin/sed","-e","#{SED_BBLAYERS_CMD1}","-i",FILE_CONF_BBLAYERS] },
+EXEC_SED_BBLAYERS={
+    :cmd => ["/bin/sed","-e","#{SED_BBLAYERS_CMD1}","-i",FILE_CONF_BBLAYERS],
+}
 
 PROFILE_APPEND= <<EOM
   source /build/edison-src/poky/oe-init-build-env #{DIR_BUILD}
 EOM
 
 EXEC_APPEND_PROFILE={
-    :cmd => ["/bin/sh","-c","echo '#{PROFILE_APPEND}' >> ~/.profile"]
+    :cmd => ["/bin/sh","-c","echo '#{PROFILE_APPEND}' >> ~/.profile"],
+    :restart_after => true,
 }
 
-# Build files (generated files)
-Rummager::ClickImage.new 'img_buildfiles', {
-    :source => %Q{
-        FROM busybox
-        VOLUME /build
-        CMD ["/bin/false"]
-    },
-    :noclean => true,
+Rummager::ClickCntnrExec.new "add_yocto", {
+  :container_name => CNTNR_DEVENV,
+  :exec_list => [
+    EXEC_GIT_EMAIL,
+    EXEC_GIT_NAME,
+    EXEC_CHOWN_SOURCES,
+    EXEC_FETCH_SOURCES,
+    EXEC_SETUP_SOURCES,
+    EXEC_SED_BBLAYERS,
+    EXEC_APPEND_CONF,
+    EXEC_APPEND_PROFILE,
+  ],
 }
 
-# Upstream sources files (unpacked Yocto & Digi)
-Rummager::ClickImage.new 'img_sources', {
-    :source => %Q{
-        FROM busybox
-        VOLUME /sources
-        CMD ["/bin/false"]
-    },
-    :noclean => true,
-}
 
-Rummager::ClickImage.new 'img_wheezy', {
-    :noclean => true,
-    :source => %Q{
-        FROM debian:wheezy
-        
-        RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-        DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y netcat
-        
-        # Configure timezone and locale
-        RUN echo "UTC" > /etc/timezone && \
-        dpkg-reconfigure -f noninteractive tzdata
-        
-        ADD scripts/detect-http-proxy /etc/apt/detect-http-proxy
-        RUN chmod +x /etc/apt/detect-http-proxy
-        ADD scripts/30detectproxy /etc/apt/apt.conf.d/30detectproxy
-        
-        ENV APT_PROXY #{APT_PROXY}
-        ENTRYPOINT ["/bin/bash","--login"]
-        CMD ["-s"]
-        
-    },
-    :add_files => [
-        'scripts/detect-http-proxy',
-        'scripts/30detectproxy',
+Rummager::ClickContainer.new CNTNR_DEVENV, {
+    :image_name => 'debian4yocto',
+    :image_nobuild => true,
+    :repo_base => 'y3ddet',
+    :binds => [ "#{HOST_EXTSRC_PATH}:#{CNTNR_EXTSRC_PATH}",
+                "#{HOST_DLCACHE_PATH}:#{CNTNR_DLCACHE_PATH}" ],
+    :publishall => true,
+    :allow_enter => true,
+    :enter_dep_jobs => [
+        :"add_yocto",
     ]
 }
 
-Rummager::ClickContainer.new CNTNR_BUILD_FILES, {
-    :image_name => 'img_buildfiles',
-    :noclean => false,
-    :start_once => true,
-}
-
-Rummager::ClickImage.new 'img_dev', {
-    :noclean => true,
-    :dep_image => 'img_wheezy',
-    :source => %Q{
-        FROM #{Rummager.repo_base}/img_wheezy
-        
-        # Install Core packages
-        RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        apt-utils sed rsync gawk wget curl unzip sudo cpio chrpath \
-        make build-essential gcc-multilib libtool autoconf automake \
-        cvs subversion git-core quilt diffstat libssl-dev \
-        vim srecord xterm texinfo libsdl1.2-dev x11vnc xvfb \
-        twm procps net-tools screen ncurses-dev \
-        nano smartpm rpm python-rpm
-        
-        RUN DEBIAN_FRONTEND=noninteractive apt-get clean
-        
-        RUN /usr/sbin/useradd minion -m -d /home/minion \
-            && echo "minion:minion" | chpasswd \
-            && /usr/sbin/adduser minion sudo \
-            && echo "%sudo  ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-        
-        USER minion
-        WORKDIR /build
-        
-        ENTRYPOINT ["/bin/bash","--login"]
-        CMD ["-s"]
-    }
-}
-
-Rummager::ClickContainer.new 'devenv', {
-    :image_name => 'img_dev',
-    :volumes_from => [CNTNR_BUILD_FILES],
-    :binds => [ "#{HOST_EXTSRC_PATH}:#{CNTNR_EXTSRC_PATH}",
-    "#{HOST_DLCACHE_PATH}:#{CNTNR_DLCACHE_PATH}" ],
-    :exposed_ports => [ "5900/tcp", "6080/tcp", ],
-    :publishall => true,
-    :allow_enter => true,
-    :exec_once => [
-      EXEC_GIT_EMAIL,
-      EXEC_GIT_NAME,
-      EXEC_CHOWN_SOURCES,
-      EXEC_FETCH_SOURCES,
-      EXEC_SETUP_SOURCES,
-      EXEC_SED_BBLAYERS,
-      EXEC_APPEND_CONF,
-      EXEC_APPEND_PROFILE,
-    ],
-}
-
-task :default => [ :"containers:devenv:enter" ]
+task :default => [ :"containers:#{CNTNR_DEVENV}:enter" ]
