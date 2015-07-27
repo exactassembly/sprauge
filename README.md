@@ -3,8 +3,9 @@
 Yocto automation toolkit for Intel Edison
 
 # Prerequisites
-    * Docker - http://www.docker.io
-    * Rummager (Ruby Rake library) - https://github.com/exactassembly/rummager
+
+* Docker - http://www.docker.io
+* Rummager (Ruby Rake library) - https://github.com/exactassembly/rummager
 
 # How to build
 Use the supplied Gemfile to configure your Ruby environment, run:
