@@ -26,8 +26,10 @@ PROJ_POSTFIX="#{PROJ_NAME}"
 CNTNR_BUILD_FILES = 'bldfiles' + PROJ_POSTFIX
 CNTNR_DEVENV = 'devenv' + PROJ_POSTFIX
 
-FILENAME_BSP='edison-src-rel1-maint-rel1-ww42-14.tgz'
-MIRROR_INTEL='http://downloadmirror.intel.com/24389/eng'
+FILENAME_BSP='edison-src-ww05-15.tgz'
+MIRROR_INTEL='http://downloadmirror.intel.com/24909/eng'
+
+# https://github.com/koenkooi/meta-edison
 
 HOST_EXTSRC_PATH="/sprauge"
 CNTNR_EXTSRC_PATH="/extsrc"
@@ -75,7 +77,7 @@ EXEC_APPEND_CONF={
 
 SED_BBLAYERS_CMD1= <<EOM
 \\%/build/edison-src/device-software/meta-edison-devtools% a\\
-  /extsrc/src/meta-sprauge/ \\\\
+  /extsrc/src/meta-sprauge \\\\
 EOM
 
 EXEC_SED_BBLAYERS={
